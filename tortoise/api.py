@@ -23,6 +23,7 @@ from tortoise.utils.diffusion import SpacedDiffusion, space_timesteps, get_named
 from tortoise.utils.tokenizer import VoiceBpeTokenizer
 from tortoise.utils.wav2vec_alignment import Wav2VecAlignment
 from contextlib import contextmanager
+from huggingface_hub import hf_hub_download
 pbar = None
 
 DEFAULT_MODELS_DIR = os.path.join(os.path.expanduser('~'), '.cache', 'tortoise', 'models')
@@ -38,44 +39,13 @@ MODELS = {
     'rlg_diffuser.pth': 'https://huggingface.co/jbetker/tortoise-tts-v2/resolve/main/.models/rlg_diffuser.pth',
 }
 
-def download_models(specific_models=None):
-    """
-    Call to download all the models that Tortoise uses.
-    """
-    os.makedirs(MODELS_DIR, exist_ok=True)
-
-    def show_progress(block_num, block_size, total_size):
-        global pbar
-        if pbar is None:
-            pbar = progressbar.ProgressBar(maxval=total_size)
-            pbar.start()
-
-        downloaded = block_num * block_size
-        if downloaded < total_size:
-            pbar.update(downloaded)
-        else:
-            pbar.finish()
-            pbar = None
-    for model_name, url in MODELS.items():
-        if specific_models is not None and model_name not in specific_models:
-            continue
-        model_path = os.path.join(MODELS_DIR, model_name)
-        if os.path.exists(model_path):
-            continue
-        print(f'Downloading {model_name} from {url}...')
-        request.urlretrieve(url, model_path, show_progress)
-        print('Done.')
-
-
 def get_model_path(model_name, models_dir=MODELS_DIR):
     """
     Get path to given model, download it if it doesn't exist.
     """
     if model_name not in MODELS:
         raise ValueError(f'Model {model_name} not found in available models.')
-    model_path = os.path.join(models_dir, model_name)
-    if not os.path.exists(model_path) and models_dir == MODELS_DIR:
-        download_models([model_name])
+    model_path = hf_hub_download(repo_id="Manmay/tortoise-tts", filename=model_name, cache_dir=models_dir)
     return model_path
 
 
