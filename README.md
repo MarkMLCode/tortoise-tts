@@ -37,7 +37,7 @@ well..... not so slow anymore now we can get a **0.25-0.3 RTF** on 4GB vram and 
 
 See [this page](http://nonint.com/static/tortoise_v2_examples.html) for a large list of example outputs.
 
-A cool application of Tortoise + GPT-3 (not affiliated with this repository): https://twitter.com/lexman_ai. Unfortunately, this proejct seems no longer to be active.
+A cool application of Tortoise + GPT-3 (not affiliated with this repository): https://twitter.com/lexman_ai. Unfortunately, this project seems no longer to be active.
 
 ## Usage guide
 
@@ -45,7 +45,7 @@ A cool application of Tortoise + GPT-3 (not affiliated with this repository): ht
 
 If you want to use this on your own computer, you must have an NVIDIA GPU.
 
-On Windows, I **highly** recommend using the Conda installation path. I have been told that if you do not do this, you
+On Windows, I **highly** recommend using the Conda installation method. I have been told that if you do not do this, you
 will spend a lot of time chasing dependency problems.
 
 First, install miniconda: https://docs.conda.io/en/latest/miniconda.html
@@ -139,6 +139,13 @@ This script allows you to speak a single phrase with one or more voices.
 ```shell
 python tortoise/do_tts.py --text "I'm going to speak this" --voice random --preset fast
 ```
+### do socket streaming
+```socket server
+python tortoise/socket_server.py 
+```
+will listen at port 5000
+
+
 ### faster inference read.py
 
 This script provides tools for reading large amounts of text.

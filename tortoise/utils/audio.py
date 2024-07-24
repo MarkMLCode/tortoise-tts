@@ -97,6 +97,9 @@ def get_voices(extra_voice_dirs=[]):
                 voices[sub] = list(glob(f'{subj}/*.wav')) + list(glob(f'{subj}/*.mp3')) + list(glob(f'{subj}/*.pth'))
     return voices
 
+def save_pth(conds, save_path):
+    torch.save(conds, save_path)
+
 
 def load_voice(voice, extra_voice_dirs=[]):
     if voice == 'random':
@@ -104,13 +107,20 @@ def load_voice(voice, extra_voice_dirs=[]):
 
     voices = get_voices(extra_voice_dirs)
     paths = voices[voice]
+    pth_files = [p for p in paths if p.endswith('.pth')]
     if len(paths) == 1 and paths[0].endswith('.pth'):
         return None, torch.load(paths[0])
     else:
         conds = []
         for cond_path in paths:
-            c = load_audio(cond_path, 22050)
-            conds.append(c)
+            if not cond_path.endswith('.pth'):
+                c = load_audio(cond_path, 22050)
+                conds.append(c)
+
+        if not pth_files:
+            pth_save_path = os.path.join(os.path.dirname(paths[0]), f"{voice}.pth")
+            save_pth(conds, pth_save_path)
+
         return conds, None
 
 
@@ -181,9 +191,13 @@ class TacotronSTFT(torch.nn.Module):
         return mel_output
 
 
-def wav_to_univnet_mel(wav, do_normalization=False, device='cuda' if not torch.backends.mps.is_available() else 'mps'):
-    stft = TacotronSTFT(1024, 256, 1024, 100, 24000, 0, 12000)
-    stft = stft.to(device)
+def wav_to_univnet_mel(wav, do_normalization=False,
+                       device='cuda' if not torch.backends.mps.is_available() else 'mps',
+                       stft=None):
+    # Don't require stft to be passed, but use it if it is.
+    if stft is None:
+        stft = TacotronSTFT(1024, 256, 1024, 100, 24000, 0, 12000)
+        stft = stft.to(device)
     mel = stft.mel_spectrogram(wav)
     if do_normalization:
         mel = normalize_tacotron_mel(mel)
