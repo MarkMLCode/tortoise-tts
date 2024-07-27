@@ -133,3 +133,6 @@ dmypy.json
 .custom/*
 results/*
 debug_states/*
+
+tortoise/voices/*
+tortoise/voices_noise_removed/*

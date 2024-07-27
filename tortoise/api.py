@@ -30,6 +30,7 @@ DEFAULT_MODELS_DIR = os.path.join(os.path.expanduser('~'), '.cache', 'tortoise',
 MODELS_DIR = os.environ.get('TORTOISE_MODELS_DIR', DEFAULT_MODELS_DIR)
 MODELS = {
     'autoregressive.pth': 'https://huggingface.co/jbetker/tortoise-tts-v2/resolve/main/.models/autoregressive.pth',
+    'autoregressive_ai.pth': 'https://huggingface.co/jbetker/tortoise-tts-v2/resolve/main/.models/autoregressive.pth',
     'classifier.pth': 'https://huggingface.co/jbetker/tortoise-tts-v2/resolve/main/.models/classifier.pth',
     'clvp2.pth': 'https://huggingface.co/jbetker/tortoise-tts-v2/resolve/main/.models/clvp2.pth',
     'cvvp.pth': 'https://huggingface.co/jbetker/tortoise-tts-v2/resolve/main/.models/cvvp.pth',
@@ -39,15 +40,42 @@ MODELS = {
     'rlg_diffuser.pth': 'https://huggingface.co/jbetker/tortoise-tts-v2/resolve/main/.models/rlg_diffuser.pth',
 }
 
+def download_models(specific_models=None):
+    """
+    Call to download all the models that Tortoise uses.
+    """
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    def show_progress(block_num, block_size, total_size):
+        global pbar
+        if pbar is None:
+            pbar = progressbar.ProgressBar(maxval=total_size)
+            pbar.start()
+        downloaded = block_num * block_size
+        if downloaded < total_size:
+            pbar.update(downloaded)
+        else:
+            pbar.finish()
+            pbar = None
+    for model_name, url in MODELS.items():
+        if specific_models is not None and model_name not in specific_models:
+            continue
+        model_path = os.path.join(MODELS_DIR, model_name)
+        if os.path.exists(model_path):
+            continue
+        print(f'Downloading {model_name} from {url}...')
+        request.urlretrieve(url, model_path, show_progress)
+        print('Done.')
+
 def get_model_path(model_name, models_dir=MODELS_DIR):
     """
     Get path to given model, download it if it doesn't exist.
     """
     if model_name not in MODELS:
         raise ValueError(f'Model {model_name} not found in available models.')
-    model_path = hf_hub_download(repo_id="Manmay/tortoise-tts", filename=model_name, cache_dir=models_dir)
+    model_path = os.path.join(models_dir, model_name)
+    if not os.path.exists(model_path) and models_dir == MODELS_DIR:
+        download_models([model_name])
     return model_path
-
 
 def pad_or_truncate(t, length):
     """
@@ -171,6 +199,16 @@ def pick_best_batch_size_for_gpu():
             return 4
     return 1
 
+def get_autoregressive_model(model_name, models_dir, use_deepspeed, kv_cache, half):
+    autoregressive = UnifiedVoice(max_mel_tokens=604, max_text_tokens=402, max_conditioning_inputs=2, layers=30,
+        model_dim=1024,
+        heads=16, number_text_tokens=255, start_text_token=255, checkpointing=False,
+        train_solo_embeddings=False).cpu().eval()
+    autoregressive.load_state_dict(torch.load(get_model_path(model_name, models_dir)), strict=False)
+    autoregressive.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=kv_cache, half=half)
+
+    return autoregressive
+
 class TextToSpeech:
     """
     Main entry point into Tortoise.
@@ -209,17 +247,16 @@ class TextToSpeech:
             use_basic_cleaners=tokenizer_basic,
         )
         self.half = half
+        self.is_narrator = True
+
         if os.path.exists(f'{models_dir}/autoregressive.ptt'):
             # Assume this is a traced directory.
             self.autoregressive = torch.jit.load(f'{models_dir}/autoregressive.ptt')
             self.diffusion = torch.jit.load(f'{models_dir}/diffusion_decoder.ptt')
         else:
-            self.autoregressive = UnifiedVoice(max_mel_tokens=604, max_text_tokens=402, max_conditioning_inputs=2, layers=30,
-                                          model_dim=1024,
-                                          heads=16, number_text_tokens=255, start_text_token=255, checkpointing=False,
-                                          train_solo_embeddings=False).cpu().eval()
-            self.autoregressive.load_state_dict(torch.load(get_model_path('autoregressive.pth', models_dir)), strict=False)
-            self.autoregressive.post_init_gpt2_config(use_deepspeed=use_deepspeed, kv_cache=kv_cache, half=self.half)
+            self.autoregressive = get_autoregressive_model('autoregressive.pth', models_dir, use_deepspeed, kv_cache, half)
+            self.autoregressive_narrator = self.autoregressive
+            self.autoregressive_ai = get_autoregressive_model('autoregressive_ai.pth', models_dir, use_deepspeed, kv_cache, half)
             
             self.diffusion = DiffusionTts(model_channels=1024, num_layers=10, in_channels=100, out_channels=200,
                                           in_latent_channels=1024, in_tokens=8193, dropout=0, use_fp16=False, num_heads=16,
@@ -259,6 +296,22 @@ class TextToSpeech:
             m = model.cpu()
         else:
             yield model
+
+    def switch_model(self, is_narrator):
+        # Skip when correct model is already loaded
+        if is_narrator == self.is_narrator:
+            return
+
+        if is_narrator:
+            self.autoregressive_ai = self.autoregressive_ai.cpu()
+            self.autoregressive_narrator = self.autoregressive_narrator.to(self.device)
+            self.autoregressive = self.autoregressive_narrator
+        else:
+            self.autoregressive_narrator = self.autoregressive_narrator.cpu()
+            self.autoregressive_ai = self.autoregressive_ai.to(self.device)
+            self.autoregressive = self.autoregressive_ai
+
+        self.is_narrator = is_narrator
 
     def load_cvvp(self):
         """Load CVVP model."""
@@ -358,7 +411,7 @@ class TextToSpeech:
             # CVVP parameters follow
             cvvp_amount=.0,
             # diffusion generation parameters follow
-            diffusion_iterations=100, cond_free=True, cond_free_k=2, diffusion_temperature=1.0,
+            diffusion_iterations=100, cond_free=True, cond_free_k=2, diffusion_temperature=1.0, overwrite_autoregressive_batch_size=None,
             **hf_generate_kwargs):
         """
         Produces an audio clip of the given text being spoken with the given reference voice.
@@ -405,6 +458,9 @@ class TextToSpeech:
         :return: Generated audio clip(s) as a torch tensor. Shape 1,S if k=1 else, (k,1,S) where S is the sample length.
                  Sample rate is 24kHz.
         """
+        if overwrite_autoregressive_batch_size is not None:
+            self.autoregressive_batch_size = overwrite_autoregressive_batch_size
+
         deterministic_seed = self.deterministic_state(seed=use_deterministic_seed)
 
         text_tokens = torch.IntTensor(self.tokenizer.encode(text)).unsqueeze(0).to(self.device)
