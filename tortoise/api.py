@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 import progressbar
 import torchaudio
+import gc
 
 from tortoise.models.classifier import AudioMiniEncoderWithClassifierHead
 from tortoise.models.diffusion_decoder import DiffusionTts
@@ -280,6 +281,7 @@ class TextToSpeech:
 
         if self.device_only:
             self.autoregressive = self.autoregressive.to(self.device)
+            self.autoregressive_ai = self.autoregressive_ai.cpu()
             self.diffusion = self.diffusion.to(self.device)
             self.clvp = self.clvp.to(self.device)
             self.vocoder = self.vocoder.to(self.device)
@@ -301,6 +303,8 @@ class TextToSpeech:
         # Skip when correct model is already loaded
         if is_narrator == self.is_narrator:
             return
+        
+        start_time = time()
 
         if is_narrator:
             self.autoregressive_ai = self.autoregressive_ai.cpu()
@@ -311,7 +315,12 @@ class TextToSpeech:
             self.autoregressive_ai = self.autoregressive_ai.to(self.device)
             self.autoregressive = self.autoregressive_ai
 
+        gc.collect()
+        torch.cuda.empty_cache()
+
         self.is_narrator = is_narrator
+
+        print(f"Switched model to {'narrator' if is_narrator else 'AI'} in {time() - start_time:.2f} seconds.")
 
     def load_cvvp(self):
         """Load CVVP model."""
