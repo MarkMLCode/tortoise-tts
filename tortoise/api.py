@@ -281,7 +281,6 @@ class TextToSpeech:
 
         if self.device_only:
             self.autoregressive = self.autoregressive.to(self.device)
-            self.autoregressive_ai = self.autoregressive_ai.cpu()
             self.diffusion = self.diffusion.to(self.device)
             self.clvp = self.clvp.to(self.device)
             self.vocoder = self.vocoder.to(self.device)
@@ -315,7 +314,7 @@ class TextToSpeech:
             self.autoregressive_ai = self.autoregressive_ai.to(self.device)
             self.autoregressive = self.autoregressive_ai
 
-        gc.collect()
+        #gc.collect()
         torch.cuda.empty_cache()
 
         self.is_narrator = is_narrator
